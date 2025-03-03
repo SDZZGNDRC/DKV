@@ -1,0 +1,23 @@
+{
+    "Addr": "localhost",
+    "Port": ":5120",
+    "Rafts": {
+        "Me": 0,
+        "Endpoints": [
+            {
+                "Addr": "localhost",
+                "Port": ":5121"
+            },
+            {
+                "Addr": "localhost",
+                "Port": ":5122"
+            },
+            {
+                "Addr": "localhost",
+                "Port": ":5123"
+            }
+        ]
+    },
+    "DataBasePath": "/path/to/database",
+    "Maxraftstate": 1000
+}
