@@ -5,8 +5,8 @@ import (
 )
 
 type Kvserver struct {
-	Addr         string
-	Port         string
+	ServerAddr   string
+	ServerPort   string
 	Rafts        raft.RaftAddrs
 	DataBasePath string
 	Maxraftstate int

@@ -435,7 +435,7 @@ func StartKVServer(conf Kvserver, me int, persister *raft.Persister, maxraftstat
 	go kv.ApplyHandler()
 
 	// server grpc
-	lis, err := net.Listen("tcp", conf.Addr+conf.Port)
+	lis, err := net.Listen("tcp", conf.ServerAddr+conf.ServerPort)
 	if err != nil {
 		DPrintf("error: etcd start faild", err)
 	}
@@ -448,7 +448,7 @@ func StartKVServer(conf Kvserver, me int, persister *raft.Persister, maxraftstat
 		}
 	}()
 
-	DPrintf("etcd serivce is running on addr: %s", conf.Addr+conf.Port)
+	DPrintf("etcd serivce is running on addr: %s", conf.ServerAddr+conf.ServerPort)
 	kv.grpc = gServer
 
 	DPrintf("server [%d] restart", kv.me)

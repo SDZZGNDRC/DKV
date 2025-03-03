@@ -1,6 +1,6 @@
 {
-    "Addr": "localhost",
-    "Port": ":5120",
+    "ServerAddr": "localhost",
+    "ServerPort": ":5110",
     "Rafts": {
         "Me": 0,
         "Endpoints": [

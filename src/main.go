@@ -17,6 +17,8 @@ var (
 func init() {
 	// 定义命令行参数
 	pflag.Int("me", -1, "节点ID,用于覆盖配置文件中的Rafts.Me")
+	pflag.String("serveraddr", "0.0.0.0", "Server Addr")
+	pflag.String("serverport", ":5120", "Server Port")
 	pflag.Parse()
 }
 
@@ -40,6 +42,24 @@ func LoadConfig(configPath string) (*kvraft.Kvserver, error) {
 		if err == nil {
 			// 直接设置到viper中，覆盖配置文件中的值
 			v.Set("Rafts.Me", me)
+		}
+	}
+	// 检查命令行是否设置了serveraddr参数
+	serveraddrValue := pflag.Lookup("serveraddr")
+	if serveraddrValue != nil && serveraddrValue.Changed {
+		serveraddr, err := pflag.CommandLine.GetString("serveraddr")
+		if err == nil {
+			// 直接设置到viper中，覆盖配置文件中的值
+			v.Set("ServerAddr", serveraddr)
+		}
+	}
+	// 检查命令行是否设置了serverport参数
+	serverportValue := pflag.Lookup("serverport")
+	if serverportValue != nil && serverportValue.Changed {
+		serverport, err := pflag.CommandLine.GetString("serverport")
+		if err == nil {
+			// 直接设置到viper中，覆盖配置文件中的值
+			v.Set("ServerPort", serverport)
 		}
 	}
 
