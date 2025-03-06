@@ -1097,7 +1097,7 @@ func Make(me int,
 
 func (rt *Raft) StartRaft(conf RaftAddr) {
 	// server grpc
-	lis, err := net.Listen("tcp", conf.Addr+conf.Port)
+	lis, err := net.Listen("tcp", "0.0.0.0"+conf.Port)
 	if err != nil {
 		log.Fatalln("error: etcd start failed", err)
 	}
