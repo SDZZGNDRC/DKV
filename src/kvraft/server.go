@@ -12,6 +12,9 @@ import (
 
 	"github.com/SDZZGNDRC/DKV/src/raft"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 
 	pb "github.com/SDZZGNDRC/DKV/proto"
 )
@@ -407,6 +410,11 @@ func (kv *KVServer) LoadSnapShot(snapShot []byte) {
 	}
 }
 
+func validateToken(token string, authToken string) bool {
+	// 这里可以添加更复杂的token验证逻辑
+	return token == authToken
+}
+
 func StartKVServer(conf Kvserver, me int, persister *raft.Persister, maxraftstate int) *KVServer {
 	// call labgob.Register on structures you want
 	// Go's RPC library to marshall/unmarshall.
@@ -439,7 +447,32 @@ func StartKVServer(conf Kvserver, me int, persister *raft.Persister, maxraftstat
 	if err != nil {
 		DPrintf("error: etcd start faild", err)
 	}
-	gServer := grpc.NewServer()
+
+	// 创建一个带有Token认证的拦截器
+	authInterceptor := func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+		md, ok := metadata.FromIncomingContext(ctx)
+		if !ok {
+			return nil, status.Errorf(codes.Unauthenticated, "无法获取元数据")
+		}
+
+		// 从metadata中获取token
+		token := md.Get("token")
+		if len(token) == 0 {
+			return nil, status.Errorf(codes.Unauthenticated, "缺少认证token")
+		}
+
+		// 验证token
+		if !validateToken(token[0], conf.AuthToken) {
+			return nil, status.Errorf(codes.Unauthenticated, "无效的token")
+		}
+
+		return handler(ctx, req)
+	}
+
+	// 使用Token认证拦截器创建gRPC服务器
+	gServer := grpc.NewServer(
+		grpc.UnaryInterceptor(authInterceptor),
+	)
 
 	pb.RegisterKvserverServer(gServer, kv)
 	go func() {

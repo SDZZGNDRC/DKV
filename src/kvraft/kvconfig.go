@@ -10,4 +10,5 @@ type Kvserver struct {
 	Rafts        raft.RaftAddrs
 	DataBasePath string
 	Maxraftstate int
+	AuthToken    string
 }

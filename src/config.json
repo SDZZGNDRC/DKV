@@ -1,5 +1,5 @@
 {
-    "ServerAddr": "localhost",
+    "ServerAddr": "0.0.0.0",
     "ServerPort": ":5110",
     "Rafts": {
         "Me": 0,
@@ -20,5 +20,5 @@
     },
     "DataBasePath": "/path/to/database",
     "Maxraftstate": 1000,
-    "API-Authenticated-Tokens": ""
+    "AuthToken": "123456789"
 }

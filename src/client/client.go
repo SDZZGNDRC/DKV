@@ -8,6 +8,7 @@ import (
 
 	pb "github.com/SDZZGNDRC/DKV/proto"
 	"github.com/SDZZGNDRC/DKV/src/kvraft"
+	"google.golang.org/grpc/metadata"
 )
 
 const (
@@ -19,6 +20,8 @@ type Clerk struct {
 	seq        uint64
 	identifier int64
 	leaderId   int
+
+	token string
 }
 
 func nrand() int64 {
@@ -34,10 +37,10 @@ func (ck *Clerk) GetSeq() (SendSeq uint64) {
 	return
 }
 
-func MakeClerk(servers []string) *Clerk {
+func MakeClerk(servers []string, token string) *Clerk {
 	ck := new(Clerk)
 	ck.servers = make([]*kvraft.KVClient, len(servers))
-
+	ck.token = token
 	for i := range ck.servers {
 		ck.servers[i] = kvraft.NewKvClient(servers[i])
 	}
@@ -60,9 +63,15 @@ func MakeClerk(servers []string) *Clerk {
 func (ck *Clerk) Get(key string) string {
 	args := &pb.GetArgs{Key: key, Seq: ck.GetSeq(), Identifier: ck.identifier}
 
+	// 创建带有token的context
+	md := metadata.New(map[string]string{
+		"token": ck.token,
+	})
+	ctx := metadata.NewOutgoingContext(context.Background(), md)
+
 	for {
 		reply := &pb.GetReply{}
-		reply, err := ck.servers[ck.leaderId].Conn.Get(context.Background(), args)
+		reply, err := ck.servers[ck.leaderId].Conn.Get(ctx, args)
 		if err != nil || reply.Err == kvraft.ErrNotLeader || reply.Err == kvraft.ErrLeaderOutDated {
 			if err != nil {
 				reply.Err = kvraft.ERRRPCFailed
@@ -108,9 +117,15 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 	// You will have to modify this function.
 	args := &pb.PutAppendArgs{Key: key, Value: value, Op: op, Seq: ck.GetSeq(), Identifier: ck.identifier}
 
+	// 创建带有token的context
+	md := metadata.New(map[string]string{
+		"token": ck.token,
+	})
+	ctx := metadata.NewOutgoingContext(context.Background(), md)
+
 	for {
 		reply := &pb.PutAppendReply{}
-		reply, err := ck.servers[ck.leaderId].Conn.PutAppend(context.Background(), args)
+		reply, err := ck.servers[ck.leaderId].Conn.PutAppend(ctx, args)
 		if err != nil || reply.Err == kvraft.ErrNotLeader || reply.Err == kvraft.ErrLeaderOutDated {
 			if err != nil {
 				reply.Err = kvraft.ERRRPCFailed
