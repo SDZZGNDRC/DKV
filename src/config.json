@@ -19,5 +19,6 @@
         ]
     },
     "DataBasePath": "/path/to/database",
-    "Maxraftstate": 1000
+    "Maxraftstate": 1000,
+    "API-Authenticated-Tokens": ""
 }
