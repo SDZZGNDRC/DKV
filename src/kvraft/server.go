@@ -266,7 +266,7 @@ func (kv *KVServer) Get(_ context.Context, args *pb.GetArgs) (reply *pb.GetReply
 	res := kv.HandleOp(opArgs)
 	reply.Err = res.Err
 	reply.Value = res.Value
-
+	log.Println("Get reply:", reply)
 	return reply, nil
 }
 
@@ -281,7 +281,7 @@ func (kv *KVServer) PutAppend(_ context.Context, args *pb.PutAppendArgs) (reply 
 
 	res := kv.HandleOp(opArgs)
 	reply.Err = res.Err
-
+	log.Println("PutAppend reply:", reply)
 	return reply, nil
 }
 
