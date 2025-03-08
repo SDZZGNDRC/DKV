@@ -526,9 +526,6 @@ func (rf *Raft) handleInstallSnapshot(serverTo int) {
 	rf.nextIndex[serverTo] = rf.matchIndex[serverTo] + 1
 }
 
-// example RequestVote RPC reply structure.
-// field names must start with capital letters!
-
 func (rf *Raft) sendAppendEntries(serverTo int, args *pb.AppendEntriesArgs) (reply *pb.AppendEntriesReply, ok bool) {
 	reply, err := rf.peers[serverTo].conn.AppendEntries(context.Background(), args)
 	return reply, err == nil
@@ -537,15 +534,10 @@ func (rf *Raft) sendAppendEntries(serverTo int, args *pb.AppendEntriesArgs) (rep
 // AppendEntries handler
 func (rf *Raft) AppendEntries(_ context.Context, args *pb.AppendEntriesArgs) (reply *pb.AppendEntriesReply, err error) {
 	reply = &pb.AppendEntriesReply{}
-	// Your code here (2A, 2B).
 	// 新leader发送的第一个消息
 
 	rf.mu.Lock()
-	// DPrintf("server %v AppendEntries 获取锁mu", rf.me)
-	defer func() {
-		// DPrintf("server %v AppendEntries 释放锁mu", rf.me)
-		rf.mu.Unlock()
-	}()
+	defer rf.mu.Unlock()
 
 	if args.Term < int64(rf.currentTerm) {
 		// 1. Reply false if term < currentTerm (§5.1)
@@ -563,10 +555,10 @@ func (rf *Raft) AppendEntries(_ context.Context, args *pb.AppendEntriesArgs) (re
 	// 不是旧 leader的话需要记录访问时间
 	rf.ResetVoteTimer()
 
-	if int(args.Term) > rf.currentTerm {
+	if int(args.Term) > rf.currentTerm || (args.Term == int64(rf.currentTerm) && rf.role == Candidate) {
 		// 新leader的第一个消息
-		rf.currentTerm = int(args.Term) // 更新iterm
-		rf.votedFor = -1                // 易错点: 更新投票记录为未投票
+		rf.currentTerm = int(args.Term) // 更新term
+		rf.votedFor = -1                // 更新投票记录为未投票
 		rf.role = Follower
 		rf.persist()
 	}
@@ -989,7 +981,6 @@ func (rf *Raft) collectVote(serverTo int, args *pb.RequestVoteArgs, muVote *sync
 	*voteCount += 1
 	if *voteCount > len(rf.peers)/2 {
 		rf.mu.Lock()
-		// DPrintf("server %v collectVote 获取锁mu", rf.me)
 		if rf.role != Candidate || rf.currentTerm != int(args.Term) {
 			// 有另外一个投票的协程收到了更新的term而更改了自身状态为Follower
 			// 或者自己的term已经过期了, 也就是被新一轮的选举追上了
