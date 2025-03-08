@@ -10,3 +10,9 @@ const (
 	ErrLeaderOutDated  = "LeaderOutDated"
 	ERRRPCFailed       = "RPCFailed"
 )
+
+const (
+	RoleLeader    = "Leader"
+	RoleFollower  = "Follower"
+	RoleCandidate = "Candidate"
+)
