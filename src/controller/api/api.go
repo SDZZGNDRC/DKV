@@ -1,6 +1,8 @@
 package api
 
 import (
+	"net/http"
+
 	"github.com/SDZZGNDRC/DKV/src/controller/api/handlers"
 	"github.com/SDZZGNDRC/DKV/src/controller/api/utils"
 	"github.com/SDZZGNDRC/DKV/src/types"
@@ -9,16 +11,19 @@ import (
 
 func CORSMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		c.Writer.Header().Set("Access-Control-Allow-Origin", "http://localhost:5173")
-		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Token, Content-Type")
-		c.Writer.Header().Set("Access-Control-Max-Age", "86400") // 预检请求缓存1天
+		method := c.Request.Method
 
-		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(204)
-			return
+		c.Header("Access-Control-Allow-Origin", "*")
+		c.Header("Access-Control-Allow-Headers", "Content-Type,AccessToken,X-CSRF-Token, Authorization, Token")
+		c.Header("Access-Control-Allow-Methods", "POST, GET, OPTIONS, DELETE, PUT")
+		c.Header("Access-Control-Expose-Headers", "Content-Length, Access-Control-Allow-Origin, Access-Control-Allow-Headers, Content-Type")
+		c.Header("Access-Control-Allow-Credentials", "true")
+
+		//放行所有OPTIONS方法
+		if method == "OPTIONS" {
+			c.AbortWithStatus(http.StatusNoContent)
 		}
-
+		// 处理请求
 		c.Next()
 	}
 }
@@ -28,10 +33,9 @@ func InitAPI(
 	apiChans types.APIChans,
 ) {
 	r := gin.Default()
+	r.Use(CORSMiddleware())
 
-	// 在路由组中添加CORS中间件（注意顺序）
 	api := r.Group("/api")
-	api.Use(CORSMiddleware())            // 先应用CORS
 	api.Use(utils.TokenAuthMiddleware()) // 再应用认证
 
 	// 路由注册
