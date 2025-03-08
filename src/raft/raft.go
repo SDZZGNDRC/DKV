@@ -64,7 +64,7 @@ const (
 
 const (
 	HeartBeatTimeOut = 50
-	ElectTimeOutBase = 500
+	ElectTimeOutBase = 400
 )
 
 // A Go object implementing a single Raft peer.
