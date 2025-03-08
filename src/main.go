@@ -15,8 +15,8 @@ func main() {
 		GetSysStatusReqChan:  make(chan struct{}),
 		GetSysStatusRespChan: make(chan *types.SysStatus),
 
-		OpGetReqChan:  make(chan *string),
-		OpGetRespChan: make(chan *string),
+		OpGetReqChan:  make(chan *types.OpGetReq),
+		OpGetRespChan: make(chan *types.OpGetResp),
 
 		OpAppendReqChan:  make(chan *types.OpAppendReq),
 		OpAppendRespChan: make(chan *types.OpAppendResp),

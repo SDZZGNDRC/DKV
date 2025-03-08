@@ -7,4 +7,5 @@ type OpPutReq struct {
 
 type OpPutResp struct {
 	Success bool
+	Err     string
 }

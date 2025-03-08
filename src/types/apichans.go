@@ -4,8 +4,8 @@ type APIChans struct {
 	GetSysStatusReqChan  chan struct{}
 	GetSysStatusRespChan chan *SysStatus
 
-	OpGetReqChan  chan *string
-	OpGetRespChan chan *string
+	OpGetReqChan  chan *OpGetReq
+	OpGetRespChan chan *OpGetResp
 
 	OpAppendReqChan  chan *OpAppendReq
 	OpAppendRespChan chan *OpAppendResp

@@ -428,16 +428,21 @@ func (kv *KVServer) GetSysStatus(reqChan chan struct{}, respChan chan *types.Sys
 	}
 }
 
-func (kv *KVServer) OpGet(reqChan chan *string, respChan chan *string) {
+func (kv *KVServer) OpGet(reqChan chan *types.OpGetReq, respChan chan *types.OpGetResp) {
 
-	for key := range reqChan {
+	for req := range reqChan {
+		if kv.rf.GetRole() != "Leader" {
+			resp := &types.OpGetResp{Value: "", Success: false, Err: "ERR_NOT_LEADER"}
+			respChan <- resp
+			continue
+		}
 		kv.mu.Lock()
-		val, exist := kv.db[*key]
-		var resp *string
+		val, exist := kv.db[req.Key]
+		var resp *types.OpGetResp
 		if exist {
-			resp = &val
+			resp = &types.OpGetResp{Value: val, Success: true, Err: ""}
 		} else {
-			resp = new(string)
+			resp = &types.OpGetResp{Value: "", Success: false, Err: "ERR_KEY_NOT_EXIST"}
 		}
 		kv.mu.Unlock()
 		respChan <- resp
@@ -447,10 +452,15 @@ func (kv *KVServer) OpGet(reqChan chan *string, respChan chan *string) {
 func (kv *KVServer) OpPut(reqChan chan *types.OpPutReq, respChan chan *types.OpPutResp) {
 
 	for op := range reqChan {
+		if kv.rf.GetRole() != "Leader" {
+			resp := &types.OpPutResp{Success: false, Err: "ERR_NOT_LEADER"}
+			respChan <- resp
+			continue
+		}
 		kv.mu.Lock()
 		kv.db[op.Key] = op.Value
 		kv.mu.Unlock()
-		resp := &types.OpPutResp{Success: true}
+		resp := &types.OpPutResp{Success: true, Err: ""}
 		respChan <- resp
 	}
 }
@@ -458,6 +468,11 @@ func (kv *KVServer) OpPut(reqChan chan *types.OpPutReq, respChan chan *types.OpP
 func (kv *KVServer) OpAppend(reqChan chan *types.OpAppendReq, respChan chan *types.OpAppendResp) {
 
 	for op := range reqChan {
+		if kv.rf.GetRole() != "Leader" {
+			resp := &types.OpAppendResp{Success: false, Err: "ERR_NOT_LEADER"}
+			respChan <- resp
+			continue
+		}
 		kv.mu.Lock()
 		val, exist := kv.db[op.Key]
 		if exist {
@@ -466,7 +481,7 @@ func (kv *KVServer) OpAppend(reqChan chan *types.OpAppendReq, respChan chan *typ
 			kv.db[op.Key] = op.Value
 		}
 		kv.mu.Unlock()
-		resp := &types.OpAppendResp{Success: true}
+		resp := &types.OpAppendResp{Success: true, Err: ""}
 		respChan <- resp
 	}
 }

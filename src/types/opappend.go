@@ -7,4 +7,5 @@ type OpAppendReq struct {
 
 type OpAppendResp struct {
 	Success bool
+	Err     string
 }

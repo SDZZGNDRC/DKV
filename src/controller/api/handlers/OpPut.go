@@ -44,7 +44,7 @@ func NewHandlers_OpPut(reqChan chan *types.OpPutReq, respChan chan *types.OpPutR
 		// 等待响应, 设置5秒超时
 		select {
 		case resp := <-respChan:
-			c.JSON(http.StatusOK, gin.H{"success": resp.Success})
+			c.JSON(http.StatusOK, gin.H{"success": resp.Success, "err": resp.Err})
 		case <-time.After(5 * time.Second):
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "ERR_SERVER_BUSY", "message": "system is busy, please try again later"})
 			return
