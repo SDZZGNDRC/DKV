@@ -20,7 +20,7 @@ import (
 	pb "github.com/SDZZGNDRC/DKV/proto"
 )
 
-const Debug = true
+const Debug = false
 
 const (
 	HandleOpTimeOut = time.Millisecond * 2000 // 超时为2s
