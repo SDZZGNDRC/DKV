@@ -413,10 +413,9 @@ func (kv *KVServer) LoadSnapShot(snapShot []byte) {
 }
 
 func (kv *KVServer) GetSysStatus(reqChan chan struct{}, respChan chan *types.SysStatus) {
-	kv.mu.Lock()
-	defer kv.mu.Unlock()
 
 	for range reqChan {
+		kv.mu.Lock()
 		respChan <- &types.SysStatus{
 			Role:      kv.rf.GetRole(),
 			ServerId:  kv.me,
@@ -424,6 +423,7 @@ func (kv *KVServer) GetSysStatus(reqChan chan struct{}, respChan chan *types.Sys
 			VotedFor:  kv.rf.GetVotedFor(),
 			Timestamp: time.Now().Unix(),
 		}
+		kv.mu.Unlock()
 	}
 }
 
