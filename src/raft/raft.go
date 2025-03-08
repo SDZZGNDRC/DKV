@@ -63,7 +63,7 @@ const (
 )
 
 const (
-	HeartBeatTimeOut = 50
+	HeartBeatTimeOut = 15
 	ElectTimeOutBase = 200
 )
 
