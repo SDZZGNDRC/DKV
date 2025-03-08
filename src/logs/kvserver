@@ -1,0 +1,24 @@
+2025-03-09T00:46:51.175+0800	debug	raft/raft.go:1130	raft[0] start by conf%!(EXTRA laneConfig.RaftEnds={0 [{43.156.129.213 :5111} {43.156.167.111 :5111} {43.156.209.174 :5111} {43.156.202.59 :5111} {43.128.88.84 :5111}]})
+2025-03-09T00:46:51.176+0800	info	raft/raft.go:1174	RESTA Term[0] [0] Restart😎
+2025-03-09T00:46:51.176+0800	error	raft/persister.go:47	read faild open data/raftstate.dat: The system cannot find the path specified.
+2025-03-09T00:46:51.176+0800	error	raft/persister.go:123	read faild open data/snapshot.dat: The system cannot find the path specified.
+2025-03-09T00:46:51.177+0800	error	raft/persister.go:134	read faild CreateFile data/snapshot.dat: The system cannot find the path specified.
+2025-03-09T00:46:51.177+0800	info	raft/raft.go:566	📷Cmi Term[0] [0] Snapshotlen[0] No need to commit snapshotIndex[-1] snapshotTerm[-1] 
+2025-03-09T00:46:51.178+0800	fatal	raft/raft.go:1199	error: etcd start faild listen tcp 43.156.129.213:5111: bind: The requested address is not valid in its context.
+2025-03-09T00:49:25.930+0800	debug	raft/raft.go:1130	raft[0] start by conf%!(EXTRA laneConfig.RaftEnds={0 [{43.156.129.213 :5111} {43.156.167.111 :5111} {43.156.209.174 :5111} {43.156.202.59 :5111} {43.128.88.84 :5111}]})
+2025-03-09T00:49:25.930+0800	info	raft/raft.go:1174	RESTA Term[0] [0] Restart😎
+2025-03-09T00:49:25.930+0800	error	raft/persister.go:47	read faild open data/raftstate.dat: The system cannot find the file specified.
+2025-03-09T00:49:25.931+0800	error	raft/persister.go:123	read faild open data/snapshot.dat: The system cannot find the file specified.
+2025-03-09T00:49:25.931+0800	error	raft/persister.go:134	read faild CreateFile data/snapshot.dat: The system cannot find the file specified.
+2025-03-09T00:49:25.931+0800	info	raft/raft.go:566	📷Cmi Term[0] [0] Snapshotlen[0] No need to commit snapshotIndex[-1] snapshotTerm[-1] 
+2025-03-09T00:49:25.932+0800	fatal	raft/raft.go:1199	error: etcd start faild listen tcp 43.156.129.213:5111: bind: The requested address is not valid in its context.
+2025-03-09T00:49:42.146+0800	debug	raft/raft.go:1130	raft[0] start by conf%!(EXTRA laneConfig.RaftEnds={0 [{43.156.129.213 :5111} {43.156.167.111 :5111} {43.156.209.174 :5111} {43.156.202.59 :5111} {43.128.88.84 :5111}]})
+2025-03-09T00:49:42.147+0800	info	raft/raft.go:1174	RESTA Term[0] [0] Restart😎
+2025-03-09T00:49:42.147+0800	error	raft/persister.go:123	read faild open data/snapshot.dat: The system cannot find the file specified.
+2025-03-09T00:49:42.148+0800	error	raft/persister.go:134	read faild CreateFile data/snapshot.dat: The system cannot find the file specified.
+2025-03-09T00:49:42.148+0800	info	raft/raft.go:566	📷Cmi Term[0] [0] Snapshotlen[0] No need to commit snapshotIndex[-1] snapshotTerm[-1] 
+2025-03-09T00:49:42.149+0800	fatal	raft/raft.go:1199	error: etcd start faild listen tcp 43.156.129.213:5111: bind: The requested address is not valid in its context.
+2025-03-09T00:50:51.183+0800	debug	raft/raft.go:1130	raft[0] start by conf%!(EXTRA laneConfig.RaftEnds={0 [{43.156.129.213 :5111} {43.156.167.111 :5111} {43.156.209.174 :5111} {43.156.202.59 :5111} {43.128.88.84 :5111}]})
+2025-03-09T00:50:51.183+0800	info	raft/raft.go:1174	RESTA Term[0] [0] Restart😎
+2025-03-09T00:50:51.184+0800	info	raft/raft.go:566	📷Cmi Term[0] [0] Snapshotlen[0] No need to commit snapshotIndex[-1] snapshotTerm[-1] 
+2025-03-09T00:50:51.184+0800	fatal	raft/raft.go:1199	error: etcd start faild listen tcp 43.156.129.213:5111: bind: The requested address is not valid in its context.

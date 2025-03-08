@@ -1,0 +1,3 @@
+2025-03-09T00:27:25.731+0800	fatal	src/main.go:23	the number of nodes is not odd
+2025-03-09T00:28:14.797+0800	fatal	src/main.go:23	the number of nodes %d is not odd 0
+2025-03-09T00:28:45.765+0800	fatal	src/main.go:23	the number of nodes 0 is not odd

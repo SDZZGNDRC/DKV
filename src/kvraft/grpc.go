@@ -1,22 +1,23 @@
 package kvraft
 
 import (
+	"github.com/SDZZGNDRC/DKV/proto/pb"
+	"github.com/SDZZGNDRC/DKV/src/pkg/laneLog"
+
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
-
-	pb "github.com/SDZZGNDRC/DKV/proto"
 )
 
 type KVClient struct {
-	Valid bool
-	Conn  pb.KvserverClient
-	// Realconn *grpc.ClientConn
+	Valid    bool
+	Conn     pb.KvserverClient
+	Realconn *grpc.ClientConn
 }
 
 func NewKvClient(addr string) *KVClient {
 	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		DPrintf("Dial failed ", err.Error())
+		laneLog.Logger.Infoln("Dail faild ", err.Error())
 		return nil
 	}
 	client := pb.NewKvserverClient(conn)

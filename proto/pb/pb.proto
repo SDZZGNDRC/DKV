@@ -1,0 +1,101 @@
+syntax = "proto3";
+
+package lane.pb;
+option go_package = "laneEtcd/proto/pb;pb";
+
+message RequestVoteArgs {
+  int64 Term = 1;
+  int64 CandidateId = 2;
+  int64 LastLogIndex = 3;
+  int64 LastLogTerm = 4;
+}
+
+message RequestVoteReply {
+  int64 Term = 1;
+  bool VoteGranted = 2;
+}
+
+message AppendEntriesArgs {
+  int64 Term = 1;
+  int64 LeaderId = 2;
+  int64 PrevLogIndex = 3;
+  int64 PrevLogTerm = 4;
+  int64 LeaderCommit = 5;
+  repeated LogType Entries = 6;
+}
+
+message LogType {
+  int64 Term = 1;
+  bytes Value = 2;
+}
+
+message AppendEntriesReply {
+  int64 Term = 1;
+  bool Success = 2;
+  int64 ConflictIndex = 3;
+  int64 ConflictTerm = 4;
+}
+
+message SnapshotInstallArgs {
+  int64 Term = 1;
+  int64 LeaderId = 2;
+  int64 LastIncludeIndex = 3;
+  int64 LastIncludeTerm = 4;
+  bytes Data = 5;
+}
+
+message SnapshotInstallReply { int64 Term = 1; }
+
+service raft {
+  rpc SnapshotInstall(SnapshotInstallArgs) returns (SnapshotInstallReply);
+  rpc AppendEntries(AppendEntriesArgs) returns (AppendEntriesReply);
+  rpc RequestVote(RequestVoteArgs) returns (RequestVoteReply);
+}
+enum OpType {
+  GetT = 0;
+  PutT = 1;
+  AppendT = 2;
+  DelT = 3;
+  BatchT = 4;
+  CAST = 5;
+  EmptyT = 6; // indicate a empty log only use to update leader commitIndex
+}
+// Put or Append
+message PutAppendArgs {
+  string Key = 1;
+  bytes Value = 2;
+  int64 DeadTime = 3;
+  bytes OriValue = 4;
+  int32 Op = 5; // "Put" or "Append"
+                // You'll have to add definitions here.
+                // Field names must start with capital
+                // letters, otherwise RPC will break.
+  int64 ClientId = 6;
+  int32 LatestOffset = 7;
+}
+
+message PutAppendReply {
+  int32 Err = 1;
+  int32 LeaderId = 2;
+  int32 ServerId = 3;
+}
+
+message GetArgs {
+  string Key = 1;
+  // You'll have to add definitions here.
+  int64 ClientId = 2;
+  int32 LatestOffset = 3;
+  bool withPrefix = 4;
+}
+
+message GetReply {
+  int32 Err = 1;
+  int32 LeaderId = 2;
+  repeated bytes Value = 3;
+  int32 ServerId = 4;
+}
+
+service kvserver {
+  rpc Get(GetArgs) returns (GetReply);
+  rpc PutAppend(PutAppendArgs) returns (PutAppendReply);
+}

@@ -1,22 +1,14 @@
 package raft
 
 import (
-	"log"
-	"math/rand"
+	"github.com/SDZZGNDRC/DKV/src/pkg/laneLog"
 )
 
 // Debugging
-const Debug = false
+const Debug = true
 
-func DPrintf(format string, a ...interface{}) (n int, err error) {
+func DPrintf(format string, a ...interface{}) {
 	if Debug {
-		log.Printf("raft---"+format, a...)
+		laneLog.Logger.Infof(format, a...)
 	}
-	return
-}
-
-func GetRandomElectTimeOut(rd *rand.Rand) int {
-	plusMs := int(rd.Float64() * 150)
-
-	return plusMs + ElectTimeOutBase
 }

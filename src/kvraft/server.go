@@ -4,287 +4,487 @@ import (
 	"bytes"
 	"context"
 	"encoding/gob"
-	"log"
 	"net"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/SDZZGNDRC/DKV/src/config"
+	"github.com/SDZZGNDRC/DKV/proto/pb"
+	"github.com/SDZZGNDRC/DKV/src/pkg/laneConfig"
+	"github.com/SDZZGNDRC/DKV/src/pkg/laneLog"
 	"github.com/SDZZGNDRC/DKV/src/raft"
-	"github.com/SDZZGNDRC/DKV/src/types"
+
+	"github.com/SDZZGNDRC/DKV/src/pkg/trie"
+
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/status"
-
-	pb "github.com/SDZZGNDRC/DKV/proto"
 )
-
-const Debug = false
-
-const (
-	HandleOpTimeOut = time.Millisecond * 2000 // 超时为2s
-)
-
-func DPrintf(format string, a ...interface{}) (n int, err error) {
-	if Debug {
-		log.Printf("kv---"+format, a...)
-	}
-	return
-}
-
-func ServerLog(format string, a ...interface{}) {
-	DPrintf("server "+format, a...)
-}
-
-type OType string
-
-const (
-	OPGet    OType = "Get"
-	OPPut    OType = "Put"
-	OPAppend OType = "Append"
-)
-
-type Op struct {
-	// Your definitions here.
-	// Field names must start with capital letters,
-	// otherwise RPC will break.
-	OpType     OType
-	Key        string
-	Val        string
-	Seq        uint64
-	Identifier int64
-}
-
-type Result struct {
-	LastSeq uint64
-	Err     string
-	Value   string
-	ResTerm int
-}
 
 type KVServer struct {
-	pb.UnimplementedKvserverServer
-
-	mu         sync.Mutex
-	me         int
-	rf         *raft.Raft
-	applyCh    chan raft.ApplyMsg
-	dead       int32                // set by Kill()
-	waiCh      map[int]*chan Result // 映射 startIndex->ch
-	historyMap map[int64]*Result    // 映射 Identifier->*result
+	mu      sync.Mutex
+	me      int
+	rf      *raft.Raft
+	applyCh chan raft.ApplyMsg
+	dead    int32 // set by Kill()
 
 	maxraftstate int // snapshot if log grows this big
-	maxMapLen    int
-	db           map[string]string
-	persister    *raft.Persister
-	lastApplied  int // 日志中的最高索引
+
+	persister *raft.Persister
+
+	//duplicateMap: use to handle mulity RPC request
+	// duplicateMap map[int64]duplicateType
+
+	lastAppliedIndex int //最近添加到状态机中的raft层的log的index
+	//lastInclude
+	lastIncludeIndex int
+	//log state machine
+	kvMap *trie.TrieX
+
+	//缓存的log, seq->index,reply
+	duplicateMap map[int64]duplicateType
 
 	grpc *grpc.Server
+
+	lastIndexCh chan int
 }
 
-func (kv *KVServer) LogInfoReceive(opArgs *Op, logType int) {
-	// logType:
-	// 	0: 新的请求
-	// 	1: 重复的请求
-	// 	2: 旧的请求
-	needPanic := false
-	dateStr := ""
-	if logType == 0 {
-		dateStr = "新的"
-	} else if logType == 1 {
-		dateStr = "重复"
-	} else {
-		dateStr = "旧的"
-		needPanic = true
-	}
-	switch opArgs.OpType {
-	case OPGet:
-		ServerLog("leader %v identifier %v Seq %v %sGet请求: Get(%v),\n", kv.me, opArgs.Identifier, opArgs.Seq, dateStr, opArgs.Key)
-	case OPPut:
-		ServerLog("leader %v identifier %v Seq %v %sPut请求: Put(%v,%v),\n", kv.me, opArgs.Identifier, opArgs.Seq, dateStr, opArgs.Key, opArgs.Val)
-	case OPAppend:
-		ServerLog("leader %v identifier %v Seq %v %sPut请求: Put(%v,%v),\n", kv.me, opArgs.Identifier, opArgs.Seq, dateStr, opArgs.Key, opArgs.Val)
-	}
-
-	if needPanic {
-		panic("没有记录更早的请求的结果")
-	}
-}
-
-func (kv *KVServer) LogInfoDBExecute(opArgs *Op, err string, res string) {
-	switch opArgs.OpType {
-	case OPGet:
-		if err != "" {
-			ServerLog("server %v DBExecute: identifier %v Seq %v DB执行Get请求: Get(%v), Err=%s\n", kv.me, opArgs.Identifier, opArgs.Seq, opArgs.Key, err)
-		} else {
-			ServerLog("server %v DBExecute: iidentifier %v Seq %v DB执行Get请求: Get(%v), res=%s\n", kv.me, opArgs.Identifier, opArgs.Seq, opArgs.Key, res)
-		}
-	case OPPut:
-		if err != "" {
-			ServerLog("server %v DBExecute: iidentifier %v Seq %v DB执行Put请求: Put(%v,%v), Err=%s\n", kv.me, opArgs.Identifier, opArgs.Seq, opArgs.Key, opArgs.Val, err)
-
-		} else {
-			ServerLog("server %v DBExecute: iidentifier %v Seq %v DB执行Put请求: Put(%v,%v), res=%s\n", kv.me, opArgs.Identifier, opArgs.Seq, opArgs.Key, opArgs.Val, res)
-		}
-	case OPAppend:
-		if err != "" {
-			ServerLog("server %v DBExecute: iidentifier %v Seq %v DB执行Append请求: Put(%v,%v), Err=%s\n", kv.me, opArgs.Identifier, opArgs.Seq, opArgs.Key, opArgs.Val, err)
-		} else {
-			ServerLog("server %v DBExecute: iidentifier %v Seq %v DB执行Append请求: Put(%v,%v), res=%s\n", kv.me, opArgs.Identifier, opArgs.Seq, opArgs.Key, opArgs.Val, res)
-		}
-	}
-}
-
-func (kv *KVServer) DBExecute(op *Op) (res Result) {
-	// 调用该函数需要持有锁
-	res.LastSeq = op.Seq
-	switch op.OpType {
-	case OPGet:
-		val, exist := kv.db[op.Key]
-		if exist {
-			kv.LogInfoDBExecute(op, "", val)
-			res.Value = val
-			return
-		} else {
-			res.Err = ErrKeyNotExist
-			res.Value = ""
-			kv.LogInfoDBExecute(op, "", ErrKeyNotExist)
-			return
-		}
-	case OPPut:
-		kv.db[op.Key] = op.Val
-		kv.LogInfoDBExecute(op, "", kv.db[op.Key])
-		return
-	case OPAppend:
-		val, exist := kv.db[op.Key]
-		if exist {
-			kv.db[op.Key] = val + op.Val
-			kv.LogInfoDBExecute(op, "", kv.db[op.Key])
-			return
-		} else {
-			kv.db[op.Key] = op.Val
-			kv.LogInfoDBExecute(op, "", kv.db[op.Key])
-			return
-		}
-	}
-	return
-}
-
-func OpToBytes(op Op) ([]byte, error) {
-	var buf bytes.Buffer
-
-	// 注册自定义类型（确保解码可用，若仅编码可省略）
-	gob.Register(OType(""))
-
-	enc := gob.NewEncoder(&buf)
-	if err := enc.Encode(op); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
-}
-
-func BytesToOp(data []byte) (*Op, error) {
-	buf := bytes.NewReader(data)
-	gob.Register(OType("")) // 必须与编码端一致
-	var op Op
-	dec := gob.NewDecoder(buf)
-	if err := dec.Decode(&op); err != nil { // 注意传递指针
-		return nil, err
-	}
-	return &op, nil
-}
-
-func (kv *KVServer) HandleOp(opArgs *Op) (res Result) {
-	// 先判断是否有历史记录
-	kv.mu.Lock()
-	if hisMap, exist := kv.historyMap[opArgs.Identifier]; exist && hisMap.LastSeq == opArgs.Seq {
-		kv.mu.Unlock()
-		ServerLog("leader %v HandleOp: identifier %v Seq %v 的请求: %s(%v, %v) 从历史记录返回\n", kv.me, opArgs.Identifier, opArgs.OpType, opArgs.Key, opArgs.Val)
-		return *hisMap
-	}
-	kv.mu.Unlock()
-
-	ServerLog("leader %v HandleOp: identifier %v Seq %v 的请求: %s(%v, %v) 准备调用Start\n", kv.me, opArgs.Identifier, opArgs.OpType, opArgs.Key, opArgs.Val)
-
-	op_bytes, err := OpToBytes(*opArgs)
-	if err != nil {
-		panic(err)
-	}
-	startIndex, startTerm, isLeader := kv.rf.Start(op_bytes)
-	if !isLeader {
-		return Result{Err: ErrNotLeader, Value: ""}
-	}
-
-	kv.mu.Lock()
-
-	// 直接覆盖之前记录的chan
-	newCh := make(chan Result)
-	kv.waiCh[startIndex] = &newCh
-	ServerLog("leader %v HandleOp: identifier %v Seq %v 的请求: %s(%v, %v) 新建管道: %p\n", kv.me, opArgs.Identifier, opArgs.Seq, opArgs.OpType, opArgs.Key, opArgs.Val, &newCh)
-	kv.mu.Unlock() // Start函数耗时较长, 先解锁
-
-	defer func() {
-		kv.mu.Lock()
-		delete(kv.waiCh, startIndex)
-		close(newCh)
-		kv.mu.Unlock()
-	}()
-
-	// 等待消息到达或超时
-	select {
-	case <-time.After(HandleOpTimeOut):
-		res.Err = ErrHandleOpTimeOut
-		ServerLog("server %v identifier %v Seq %v: 超时", kv.me, opArgs.Identifier, opArgs.Seq)
-		return
-	case msg, success := <-newCh:
-		if success && msg.ResTerm == startTerm {
-			res = msg
-			ServerLog("server %v HandleOp: identifier %v Seq %v: HandleOp 成功, %s(%v, %v), res=%v", kv.me, opArgs.Identifier, opArgs.Seq, opArgs.OpType, opArgs.Key, opArgs.Val, res.Value)
-			return
-		} else if !success {
-			// 通道已经关闭, 有另一个协程收到了消息 或 通道被更新的RPC覆盖
-			// TODO: 是否需要判断消息到达时自己已经不是leader了?
-			ServerLog("server %v HandleOp: identifier %v Seq %v: 通道已经关闭, 有另一个协程收到了消息 或 更新的RPC覆盖, args.OpType=%v, args.Key=%+v", kv.me, opArgs.Identifier, opArgs.Seq, opArgs.OpType, opArgs.Key)
-			res.Err = ErrChanClose
-			return
-		} else {
-			// term与一开始不匹配, 说明这个Leader可能过期了
-			ServerLog("server %v HandleOp: identifier %v Seq %v: term与一开始不匹配, 说明这个Leader可能过期了, res.ResTerm=%v, startTerm=%+v", kv.me, opArgs.Identifier, opArgs.Seq, res.ResTerm, startTerm)
-			res.Err = ErrLeaderOutDated
-			res.Value = ""
-			return
-		}
-	}
+type duplicateType struct {
+	Offset int32
+	// Reply     string
+	CASResult bool
 }
 
 func (kv *KVServer) Get(_ context.Context, args *pb.GetArgs) (reply *pb.GetReply, err error) {
-	reply = &pb.GetReply{}
-	opArgs := &Op{OpType: OPGet, Seq: args.Seq, Key: args.Key, Identifier: args.Identifier}
+	reply = new(pb.GetReply)
+	reply.Err = ErrWrongLeader
+	reply.LeaderId = int32(kv.rf.GetleaderId())
+	reply.ServerId = int32(kv.me)
 
-	res := kv.HandleOp(opArgs)
-	reply.Err = res.Err
-	reply.Value = res.Value
+	//判断自己是不是leader
+	if _, ok := kv.rf.GetState(); ok {
+		// laneLog.Logger.Infof("server [%d] [info] i am leader", kv.me)
+	} else {
+		// laneLog.Logger.Infof("server [%d] [info] i am not leader ,leader is [%d]", kv.me, reply.LeaderId)
+		return
+	}
+
+	//判断自己有没有从重启中恢复完毕状态机
+	if !kv.rf.IisBack {
+		laneLog.Logger.Infof("server [%d] [recovering] reject a [Get]🔰 args[%v]", kv.me, args)
+		reply.Err = ErrWaitForRecover
+		b := new(bytes.Buffer)
+		e := gob.NewEncoder(b)
+		e.Encode(raft.Op{
+			OpType: int32(pb.OpType_EmptyT),
+		})
+		if err != nil {
+			laneLog.Logger.Fatalln(err)
+		}
+		kv.rf.Start(b.Bytes())
+		return reply, nil
+	}
+
+	readLastIndex := kv.rf.GetCommitIndex()
+	term := kv.rf.GetTerm()
+	//需要发送一轮心跳获得大多数回复，只是为了确定没有一个任期更加新的leader，保证自己的数据不是脏的
+	if kv.rf.CheckIfDepose() {
+		reply.Err = ErrWrongLeader
+		return
+	}
+
+	//return false ,但是进入下面代码段的时候，发现自己又不是leader了，捏麻麻的
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
+	//跟raft层之间的同步问题，raft刚当选leader的时候，还没有
+
+	var value [][]byte
+	if args.WithPrefix {
+		entrys := kv.kvMap.GetEntryWithPrefix(args.Key)
+		value = make([][]byte, 0, len(entrys))
+		for _, e := range entrys {
+			value = append(value, e.Value)
+		}
+	} else {
+		v, ok := kv.kvMap.GetEntry(args.Key)
+		if ok {
+			value = append(value, v.Value)
+		}
+	}
+
+	if kv.lastAppliedIndex >= readLastIndex && kv.rf.GetLeader() && term == kv.rf.GetTerm() {
+		if len(value) == 0 {
+			reply.Err = ErrNoKey
+			return
+		}
+		reply.Err = ErrOK
+		reply.Value = value
+		// laneLog.Logger.Infof("server [%d] [Get] [ok] lastAppliedIndex[%d] readLastIndex[%d]", kv.me, kv.lastAppliedIndex, readLastIndex)
+		// laneLog.Logger.Infof("server [%d] [Get] [Ok] the get args[%v] reply[%v]", kv.me, args, reply)
+	} else {
+		reply.Err = ErrWaitForRecover
+		// laneLog.Logger.Infof("server [%d] [Get] [ErrWaitForRecover] kv.lastAppliedIndex < readLastIndex args[%v] reply[%v]", kv.me, *args, *reply)
+	}
+
+	// laneLog.Logger.Infof("server [%d] [Get] [NoKey] the get args[%v] reply[%v]", kv.me, args, reply)
+	// laneLog.Logger.Infof("server [%d] [map] -> %v", kv.me, kv.kvMap)
 
 	return reply, nil
 }
 
 func (kv *KVServer) PutAppend(_ context.Context, args *pb.PutAppendArgs) (reply *pb.PutAppendReply, err error) {
-	reply = &pb.PutAppendReply{}
-	opArgs := &Op{Seq: args.Seq, Key: args.Key, Val: args.Value, Identifier: args.Identifier}
-	if args.Op == "Put" {
-		opArgs.OpType = OPPut
+	// start := time.Now()
+	// laneLog.Logger.Infof("server [%d] [PutAppend] 📨receive a args[%v]", kv.me, args.String())
+	// defer func() {
+	// 	laneLog.Logger.Infof("server [%d] [PutAppend] 📨complete a args[%v] spand time:%v", kv.me, args.String(), time.Since(start))
+	// }()
+	reply = new(pb.PutAppendReply)
+	// Your code here.
+	reply.LeaderId = int32(kv.rf.GetleaderId())
+	reply.Err = ErrWrongLeader
+	reply.ServerId = int32(kv.me)
+
+	if _, ok := kv.rf.GetState(); ok {
+		// laneLog.Logger.Infof("server [%d] [info] i am leader", kv.me)
 	} else {
-		opArgs.OpType = OPAppend
+		// laneLog.Logger.Infof("server [%d] [info] i am not leader ,leader is [%d]", kv.me, reply.LeaderId)
+		return
+	}
+	// v := DateToValue(args.Value)
+
+	op := raft.Op{
+		ClientId: args.ClientId,
+		Offset:   args.LatestOffset,
+		OpType:   args.Op,
+		Key:      args.Key,
+		OriValue: args.OriValue,
+		Entry: trie.Entry{
+			Value:    args.Value,
+			DeadTime: args.DeadTime,
+		},
 	}
 
-	res := kv.HandleOp(opArgs)
-	reply.Err = res.Err
+	//start前需要查看本地log缓存是否有seq
 
+	//这里通过缓存提交，一方面提高了kvserver应对网络错误的回复速度，另一方面进行了第一层的重复检测
+	//但是注意可能同时有两个相同的getDuplicateMap通过这里
+	kv.mu.Lock()
+	if args.LatestOffset < kv.duplicateMap[args.ClientId].Offset {
+		kv.mu.Unlock()
+		//laneLog.Logger.Debugln("pass", kv.me)
+		return
+	}
+	if args.LatestOffset == kv.duplicateMap[args.ClientId].Offset {
+		if op.OpType != int32(pb.OpType_CAST) {
+			reply.Err = ErrOK
+		} else {
+			if kv.duplicateMap[args.ClientId].CASResult {
+				reply.Err = ErrOK
+			} else {
+				reply.Err = ErrCasFaildInt
+			}
+		}
+		//laneLog.Logger.Debugln("pass", kv.me)
+		kv.mu.Unlock()
+		return
+	}
+	kv.mu.Unlock()
+
+	//没有在本地缓存发现过seq
+	//向raft提交操作
+	// laneLog.Logger.Debugln("raw data:", []byte(op.Value))
+	// data, err := json.Marshal(op)
+
+	index, term, isleader := kv.rf.Start(op.Marshal())
+
+	if !isleader {
+		return
+	}
+
+	kv.rf.SendAppendEntriesToAll()
+	// laneLog.Logger.Infof("server [%d] submit to raft key[%v] value[%v]", kv.me, op.Key, op.Value)
+	//提交后阻塞等待
+	//等待applyCh拿到对应的index，比对seq是否正确
+	startWait := time.Now()
+	for !kv.killed() {
+
+		kv.mu.Lock()
+
+		if index <= kv.lastAppliedIndex {
+			//双重防重复
+			if args.LatestOffset < kv.duplicateMap[args.ClientId].Offset {
+				//laneLog.Logger.Debugln("pass", kv.me)
+				kv.mu.Unlock()
+				return
+			}
+			if args.LatestOffset == kv.duplicateMap[args.ClientId].Offset {
+				if op.OpType != int32(pb.OpType_CAST) {
+					reply.Err = ErrOK
+				} else {
+					if kv.duplicateMap[args.ClientId].CASResult {
+						reply.Err = ErrOK
+					} else {
+						reply.Err = ErrCasFaildInt
+					}
+				}
+				//laneLog.Logger.Debugln("pass", kv.me)
+				kv.mu.Unlock()
+				return
+			}
+
+			laneLog.Logger.Infof("server [%d] [PutAppend] appliedIndex available :PutAppend index[%d] lastAppliedIndex[%d]", kv.me, index, kv.lastAppliedIndex)
+			if term != kv.rf.GetTerm() {
+				//term不匹配了，说明本次提交失效
+				kv.mu.Unlock()
+				//laneLog.Logger.Debugln("pass", kv.me)
+				return
+			} //term匹配，说明本次提交一定是有效的
+
+			reply.Err = ErrOK
+			laneLog.Logger.Infof("server [%d] [PutAppend] success args.index[%d]", kv.me, index)
+			kv.mu.Unlock()
+			if _, isleader := kv.rf.GetState(); !isleader {
+				reply.Err = ErrWrongLeader
+			}
+			//laneLog.Logger.Debugln("pass", kv.me)
+			return
+		}
+		kv.mu.Unlock()
+		select {
+		case <-kv.lastIndexCh:
+			// 阻塞等待
+		case <-time.After(time.Millisecond * 500):
+			laneLog.Logger.Infof("server [%d] [PutAppend] fail [time out] args.index[%d]", kv.me, index)
+			return
+		}
+		// 因为time.After可能会在超时前多次被重置，所以还需要在外层额外做保证
+		if time.Since(startWait).Milliseconds() > 500 {
+			laneLog.Logger.Infof("server [%d] [PutAppend] fail [time out] args.index[%d]", kv.me, index)
+			return
+		}
+	}
 	return reply, nil
 }
 
+// state machine
+// 将value重新转换为 Op，添加到本地kvMap中
+func (kv *KVServer) HandleApplych() {
+	for !kv.killed() {
+		select {
+		case raft_type := <-kv.applyCh:
+			//laneLog.Logger.Debugln("pass", kv.me)
+			if kv.killed() {
+				return
+			}
+			kv.mu.Lock()
+			if raft_type.CommandValid {
+				kv.HandleApplychCommand(raft_type)
+				kv.checkifNeedSnapshot(raft_type.CommandIndex)
+				kv.lastAppliedIndex = raft_type.CommandIndex
+				for {
+					select {
+					case kv.lastIndexCh <- raft_type.CommandIndex:
+					default:
+						goto APPLYBREAK
+					}
+				}
+			APPLYBREAK:
+				// laneLog.Logger.Debugln("pass", kv.me, "  raft_type.CommandIndex=", raft_type.CommandIndex)
+			} else if raft_type.SnapshotValid {
+				laneLog.Logger.Infof("📷 server [%d] receive raftSnapshotIndex[%d]", kv.me, raft_type.SnapshotIndex)
+				kv.HandleApplychSnapshot(raft_type)
+			} else {
+				laneLog.Logger.Fatalf("Unrecordnized applyArgs type")
+			}
+			kv.mu.Unlock()
+		}
+
+	}
+}
+
+func (kv *KVServer) HandleApplychCommand(raft_type raft.ApplyMsg) {
+	OP := new(raft.Op)
+	OP.Unmarshal(raft_type.Command)
+	if OP.OpType == int32(pb.OpType_EmptyT) {
+		return
+	}
+	if OP.Offset <= kv.duplicateMap[OP.ClientId].Offset {
+		laneLog.Logger.Infof("⛔server [%d] [%v] lastapplied[%v]find in the cache and discard %v", kv.me, OP, kv.lastAppliedIndex, kv.kvMap)
+		return
+	}
+	kv.duplicateMap[OP.ClientId] = duplicateType{
+		Offset: OP.Offset,
+	}
+	switch OP.OpType {
+	case int32(pb.OpType_PutT):
+		//更新状态机
+		//有可能有多个start重复执行，所以这一步要检验重复
+
+		kv.kvMap.PutEntry(OP.Key, OP.Entry)
+		// laneLog.Logger.Infof("server [%d] [Update] [Put]->[%s,%s] [map] -> %v", kv.me, op_type.Key, op_type.Value, kv.kvMap)
+		// laneLog.Logger.Infof("server [%d] [Update] [Put]->[%s : %s] ", kv.me, op_type.Key, op_type.Value)
+	case int32(pb.OpType_AppendT):
+
+		ori, _ := kv.kvMap.GetEntry(OP.Key)
+		var buffer bytes.Buffer
+
+		// 写入数据
+		buffer.Write(ori.Value)
+		buffer.Write(OP.Entry.Value)
+
+		// 获取拼接结果
+		result := buffer.Bytes()
+		kv.kvMap.PutEntry(OP.Key, trie.Entry{
+			Value:    result,
+			DeadTime: OP.Entry.DeadTime,
+		})
+		// laneLog.Logger.Infof("server [%d] [Update] [Append]->[%s : %s]", kv.me, op_type.Key, op_type.Value)
+
+	case int32(pb.OpType_DelT):
+
+		kv.kvMap.Del(OP.Key)
+
+	case int32(pb.OpType_CAST):
+		ori, _ := kv.kvMap.GetEntry(OP.Key)
+		if bytes.Equal(ori.Value, OP.OriValue) {
+			if len(OP.Entry.Value) == 0 {
+				kv.kvMap.Del(OP.Key)
+			} else {
+				kv.kvMap.PutEntry(OP.Key, OP.Entry)
+			}
+			kv.duplicateMap[OP.ClientId] = duplicateType{
+				Offset:    OP.Offset,
+				CASResult: true,
+			}
+		}
+	case int32(pb.OpType_GetT):
+
+		laneLog.Logger.Fatalf("日志中不应该出现getType")
+
+	case int32(pb.OpType_BatchT):
+		var ops []raft.Op
+		b := bytes.NewBuffer([]byte(OP.Entry.Value))
+		d := gob.NewDecoder(b)
+		err := d.Decode(&ops)
+		if err != nil {
+			laneLog.Logger.Fatalln("raw data:", []byte(OP.Entry.Value), err)
+		}
+		for _, op := range ops {
+			switch op.OpType {
+			case int32(pb.OpType_PutT):
+				kv.kvMap.PutEntry(op.Key, op.Entry)
+			case int32(pb.OpType_AppendT):
+				ori, _ := kv.kvMap.GetEntry(op.Key)
+
+				var buffer bytes.Buffer
+
+				// 写入数据
+				buffer.Write(ori.Value)
+				buffer.Write(op.Entry.Value)
+
+				// 获取拼接结果
+				result := buffer.Bytes()
+				kv.kvMap.PutEntry(op.Key, trie.Entry{
+					Value:    result,
+					DeadTime: op.Entry.DeadTime,
+				})
+			case int32(pb.OpType_DelT):
+				kv.kvMap.Del(op.Key)
+			}
+			// laneLog.Logger.Infof("exec batch op: %+v", op)
+		}
+
+	default:
+		laneLog.Logger.Fatalf("日志中出现未知optype = [%d]", OP.OpType)
+	}
+
+}
+
+// 被动快照,follower接受从leader传来的snapshot
+func (kv *KVServer) HandleApplychSnapshot(raft_type raft.ApplyMsg) {
+	if raft_type.SnapshotIndex < kv.lastAppliedIndex {
+		return
+	}
+	snapshot := raft_type.Snapshot
+	kv.readPersist(snapshot)
+	laneLog.Logger.Infof("server [%d] passive📷 lastAppliedIndex[%d] -> [%d]", kv.me, kv.lastAppliedIndex, raft_type.SnapshotIndex)
+	kv.lastAppliedIndex = raft_type.SnapshotIndex
+	for {
+		select {
+		case kv.lastIndexCh <- raft_type.CommandIndex:
+		default:
+			goto SNAPBREAK
+		}
+	}
+SNAPBREAK:
+}
+
+// 主动快照,每一个服务器都在自己log超标的时候启动快照
+func (kv *KVServer) checkifNeedSnapshot(spanshotindex int) {
+	if kv.maxraftstate == -1 {
+		return
+	}
+	if !kv.rf.IfNeedExceedLog(kv.maxraftstate) {
+		return
+	} //需要进行快照了
+
+	laneLog.Logger.Infof("server [%d] need snapshot limit[%d] curRaftStatesize[%d] snapshotIndex[%d]", kv.me, kv.maxraftstate, kv.persister.RaftStateSize(), spanshotindex)
+	//首先查看一下自己的状态机应用到了那一步
+
+	var buf bytes.Buffer
+	enc := gob.NewEncoder(&buf)
+	if err := enc.Encode(kv.duplicateMap); err != nil {
+		laneLog.Logger.Fatalf("snapshot duplicateMap encoder fail:%s", err)
+	}
+	kv.kvMap.MarshalEncoder(enc)
+
+	//将状态机传了进去
+	kv.rf.Snapshot(spanshotindex, buf.Bytes())
+
+}
+
+// 被动快照
+func (kv *KVServer) readPersist(data []byte) {
+	if data == nil || len(data) < 1 {
+		return
+	}
+	laneLog.Logger.Infof("server [%d] passive 📷 len of snapshotdate[%d] ", kv.me, len(data))
+	laneLog.Logger.Infof("server [%d] before map[%v]", kv.me, kv.kvMap)
+	r := bytes.NewBuffer(data)
+	d := gob.NewDecoder(r)
+
+	duplicateMap := make(map[int64]duplicateType)
+	if err := d.Decode(&duplicateMap); err != nil {
+		laneLog.Logger.Fatalf("decode err:%s", err)
+	}
+
+	newKvmap := trie.NewTrieX()
+	keys := make([]string, 0)
+	values := make([]string, 0)
+	err := d.Decode(&keys)
+	if err != nil {
+		laneLog.Logger.Fatalln("read persiset err", err)
+	}
+	err = d.Decode(&values)
+	if err != nil {
+		laneLog.Logger.Fatalln("read persiset err", err)
+	}
+	for i := range keys {
+		newKvmap.Put(keys[i], values[i])
+	}
+	kv.kvMap = newKvmap
+	kv.duplicateMap = duplicateMap
+
+	laneLog.Logger.Infof("server [%d] after map[%v]", kv.me, kv.kvMap)
+
+}
+
+// the tester calls Kill() when a KVServer instance won't
+// be needed again. for your convenience, we supply
+// code to set rf.dead (without needing a lock),
+// and a killed() method to test rf.dead in
+// long-running loops. you can also add your own
+// code to Kill(). you're not required to do anything
+// about this, but it may be convenient (for example)
+// to suppress debug output from a Kill()ed instance.
 func (kv *KVServer) Kill() {
 	atomic.StoreInt32(&kv.dead, 1)
 	kv.rf.Kill()
@@ -296,213 +496,59 @@ func (kv *KVServer) killed() bool {
 	return z == 1
 }
 
-func (kv *KVServer) ApplyHandler() {
-	for !kv.killed() {
-		log := <-kv.applyCh
-		if log.CommandValid {
-			decodedOp, err := BytesToOp(log.Command)
-			if err != nil {
-				panic(err)
-			}
-			kv.mu.Lock()
-
-			// 如果在follower一侧, 可能这个log包含在快照中, 直接跳过
-			if log.CommandIndex <= kv.lastApplied {
-				kv.mu.Unlock()
-				continue
-			}
-
-			kv.lastApplied = log.CommandIndex
-
-			// 需要判断这个log是否需要被再次应用
-			var res Result
-
-			needApply := false
-			if hisMap, exist := kv.historyMap[decodedOp.Identifier]; exist {
-				if hisMap.LastSeq == decodedOp.Seq {
-					// 历史记录存在且Seq相同, 直接套用历史记录
-					res = *hisMap
-				} else if hisMap.LastSeq < decodedOp.Seq {
-					// 否则新建
-					needApply = true
-				}
-			} else {
-				// 历史记录不存在
-				needApply = true
-			}
-
-			if needApply {
-				// 执行log
-				res = kv.DBExecute(decodedOp)
-				res.ResTerm = log.SnapshotTerm
-
-				// 更新历史记录
-				kv.historyMap[decodedOp.Identifier] = &res
-			}
-
-			// Leader还需要额外通知handler处理clerk回复
-			ch, exist := kv.waiCh[log.CommandIndex]
-			if exist {
-				kv.mu.Unlock()
-				// 发送消息
-				func() {
-					defer func() {
-						if recover() != nil {
-							// 如果这里有 panic，是因为通道关闭
-							ServerLog("leader %v ApplyHandler: 发现 identifier %v Seq %v 的管道不存在, 应该是超时被关闭了", kv.me, decodedOp.Identifier, decodedOp.Seq)
-						}
-					}()
-					res.ResTerm = log.SnapshotTerm
-
-					*ch <- res
-				}()
-				kv.mu.Lock()
-			}
-
-			// 每收到一个log就检测是否需要生成快照
-			if kv.maxraftstate != -1 && kv.persister.RaftStateSize() >= kv.maxraftstate/100*95 {
-				// 当达到95%容量时需要生成快照
-				snapShot := kv.GenSnapShot()
-				kv.rf.Snapshot(log.CommandIndex, snapShot)
-			}
-			kv.mu.Unlock()
-		} else if log.SnapshotValid {
-			// 日志项是一个快照
-			kv.mu.Lock()
-			if log.SnapshotIndex >= kv.lastApplied {
-				kv.LoadSnapShot(log.Snapshot)
-				kv.lastApplied = log.SnapshotIndex
-			}
-			kv.mu.Unlock()
-		}
-	}
-}
-
-func (kv *KVServer) GenSnapShot() []byte {
-	// 调用时必须持有锁mu
-	w := new(bytes.Buffer)
-	e := gob.NewEncoder(w)
-
-	e.Encode(kv.db)
-	e.Encode(kv.historyMap)
-
-	serverState := w.Bytes()
-	return serverState
-}
-
-func (kv *KVServer) LoadSnapShot(snapShot []byte) {
-	// 调用时必须持有锁mu
-	if len(snapShot) == 0 || snapShot == nil {
-		ServerLog("server %v LoadSnapShot: 快照为空", kv.me)
-		return
+// servers[] contains the ports of the set of
+// servers that will cooperate via Raft to
+// form the fault-tolerant key/value service.
+// me is the index of the current server in servers[].
+// the k/v server should store snapshots through the underlying Raft
+// implementation, which should call persister.SaveStateAndSnapshot() to
+// atomically save the Raft state along with the snapshot.
+// the k/v server should snapshot when Raft's saved state exceeds maxraftstate bytes,
+// in order to allow Raft to garbage-collect its log. if maxraftstate is -1,
+// you don't need to snapshot.
+// StartKVServer() must return quickly, so it should start goroutines
+// for any long-running work.
+func StartKVServer(conf laneConfig.Kvserver, me int, persister *raft.Persister, maxraftstate int) *KVServer {
+	var err error
+	gob.Register(raft.Op{})
+	gob.Register(map[string]string{})
+	gob.Register(map[int64]duplicateType{})
+	kv := &KVServer{
+		me:               me,
+		maxraftstate:     maxraftstate,
+		persister:        persister,
+		applyCh:          make(chan raft.ApplyMsg),
+		lastAppliedIndex: 0,
+		lastIncludeIndex: 0,
+		kvMap:            trie.NewTrieX(),
+		lastIndexCh:      make(chan int),
+		duplicateMap:     make(map[int64]duplicateType),
 	}
 
-	r := bytes.NewBuffer(snapShot)
-	d := gob.NewDecoder(r)
-
-	tmpDB := make(map[string]string)
-	tmpHistoryMap := make(map[int64]*Result)
-	if d.Decode(&tmpDB) != nil ||
-		d.Decode(&tmpHistoryMap) != nil {
-		ServerLog("server %v LoadSnapShot 加载快照失败\n", kv.me)
-	} else {
-		kv.db = tmpDB
-		kv.historyMap = tmpHistoryMap
-		ServerLog("server %v LoadSnapShot 加载快照成功\n", kv.me)
-	}
-}
-
-func (kv *KVServer) GetSysStatus(reqChan chan struct{}, respChan chan *types.SysStatus) {
-	kv.mu.Lock()
-	defer kv.mu.Unlock()
-
-	for range reqChan {
-		respChan <- &types.SysStatus{
-			Role:      kv.rf.GetRole(),
-			ServerId:  kv.me,
-			Term:      kv.rf.GetCurrentTerm(),
-			VotedFor:  kv.rf.GetVotedFor(),
-			Timestamp: time.Now().Unix(),
-		}
-	}
-}
-
-func validateToken(token string, authToken string) bool {
-	// 这里可以添加更复杂的token验证逻辑
-	return token == authToken
-}
-
-func StartKVServer(conf *config.GlobalConfig, me int, persister *raft.Persister, maxraftstate int, apiChan *types.APIChans) *KVServer {
-	gob.Register(Op{})
-
-	kv := new(KVServer)
-	kv.me = me
-	kv.maxraftstate = maxraftstate
-
-	// You may need initialization code here.
-
-	kv.applyCh = make(chan raft.ApplyMsg)
 	kv.rf = raft.Make(me, persister, kv.applyCh, conf.Rafts)
-	kv.persister = persister
 
-	// You may need initialization code here.
-	kv.historyMap = make(map[int64]*Result)
-	kv.db = make(map[string]string)
-	kv.waiCh = make(map[int]*chan Result)
+	//state machine
 
-	// 先在启动时检查是否有快照
-	kv.mu.Lock()
-	kv.LoadSnapShot(persister.ReadSnapshot())
-	kv.mu.Unlock()
-
-	go kv.ApplyHandler()
-
+	kv.readPersist(persister.ReadSnapshot())
+	go kv.HandleApplych()
+	// go kv.HandleSnapshot()
+	// go kv.handleGetTask()
 	// server grpc
 	lis, err := net.Listen("tcp", conf.ServerAddr+conf.ServerPort)
 	if err != nil {
-		DPrintf("error: etcd start faild", err)
+		laneLog.Logger.Fatalln("error: etcd start failed", err)
 	}
-
-	// 创建一个带有Token认证的拦截器
-	authInterceptor := func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-		md, ok := metadata.FromIncomingContext(ctx)
-		if !ok {
-			return nil, status.Errorf(codes.Unauthenticated, "无法获取元数据")
-		}
-
-		// 从metadata中获取token
-		token := md.Get("token")
-		if len(token) == 0 {
-			return nil, status.Errorf(codes.Unauthenticated, "缺少认证token")
-		}
-
-		// 验证token
-		if !validateToken(token[0], conf.AuthToken) {
-			return nil, status.Errorf(codes.Unauthenticated, "无效的token")
-		}
-
-		return handler(ctx, req)
-	}
-
-	// 使用Token认证拦截器创建gRPC服务器
-	gServer := grpc.NewServer(
-		grpc.UnaryInterceptor(authInterceptor),
-	)
-
+	gServer := grpc.NewServer()
 	pb.RegisterKvserverServer(gServer, kv)
 	go func() {
 		if err := gServer.Serve(lis); err != nil {
-			DPrintf("failed to serve : ", err.Error())
+			laneLog.Logger.Fatalln("failed to serve : ", err.Error())
 		}
 	}()
 
-	DPrintf("etcd serivce is running on addr: %s", conf.ServerAddr+conf.ServerPort)
+	laneLog.Logger.Infoln("etcd service is running on addr:", conf.ServerAddr+conf.ServerPort)
 	kv.grpc = gServer
 
-	// start api goroutine
-	go kv.GetSysStatus(apiChan.GetSysStatusReqChan, apiChan.GetSysStatusRespChan)
-
-	DPrintf("server [%d] restart", kv.me)
-
+	laneLog.Logger.Infof("server [%d] restart", kv.me)
 	return kv
 }
