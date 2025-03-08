@@ -17,7 +17,7 @@ func TokenValid(c *gin.Context) bool {
 			return true
 		}
 	}
-	log.Println("Token ", tokenString, " is not valid; should be one of ", Authenticated_Tokens)
+	log.Println("Token", tokenString, "is not valid; should be one of", Authenticated_Tokens)
 	return false
 }
 

@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/SDZZGNDRC/DKV/src/config"
 	"github.com/SDZZGNDRC/DKV/src/raft"
 	"github.com/SDZZGNDRC/DKV/src/types"
 	"google.golang.org/grpc"
@@ -431,7 +432,7 @@ func validateToken(token string, authToken string) bool {
 	return token == authToken
 }
 
-func StartKVServer(conf Kvserver, me int, persister *raft.Persister, maxraftstate int, apiChan *types.APIChans) *KVServer {
+func StartKVServer(conf *config.GlobalConfig, me int, persister *raft.Persister, maxraftstate int, apiChan *types.APIChans) *KVServer {
 	gob.Register(Op{})
 
 	kv := new(KVServer)
