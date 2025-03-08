@@ -437,13 +437,8 @@ func (kv *KVServer) OpGet(reqChan chan *types.OpGetReq, respChan chan *types.OpG
 			continue
 		}
 		kv.mu.Lock()
-		val, exist := kv.db[req.Key]
-		var resp *types.OpGetResp
-		if exist {
-			resp = &types.OpGetResp{Value: val, Success: true, Err: ""}
-		} else {
-			resp = &types.OpGetResp{Value: "", Success: false, Err: "ERR_KEY_NOT_EXIST"}
-		}
+		val := kv.db[req.Key]
+		resp := &types.OpGetResp{Value: val, Success: true, Err: ""}
 		kv.mu.Unlock()
 		respChan <- resp
 	}
