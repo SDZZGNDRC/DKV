@@ -9,14 +9,15 @@ import (
 )
 
 type GlobalConfig struct {
-	ServerAddr   string
-	ServerPort   string
-	Rafts        raft.RaftAddrs
-	DataBasePath string
-	Maxraftstate int
-	AuthToken    string
-	APIAddr      string
-	APIPort      string
+	ServerAddr    string
+	ServerPort    string
+	Rafts         raft.RaftAddrs
+	DataBasePath  string
+	Maxraftstate  int
+	AuthToken     string
+	APIAuthTokens []string
+	APIAddr       string
+	APIPort       string
 }
 
 var Config *GlobalConfig

@@ -4,20 +4,18 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/SDZZGNDRC/DKV/src/config"
 	"github.com/gin-gonic/gin"
-	"github.com/spf13/viper"
 )
-
-var Authenticated_Tokens = viper.GetStringSlice("API-Authenticated-Tokens")
 
 func TokenValid(c *gin.Context) bool {
 	tokenString := c.GetHeader("Token")
-	for _, i := range Authenticated_Tokens {
+	for _, i := range config.Config.APIAuthTokens {
 		if tokenString == i {
 			return true
 		}
 	}
-	log.Println("Token", tokenString, "is not valid; should be one of", Authenticated_Tokens)
+	log.Println("Token", tokenString, "is not valid; should be one of", config.Config.APIAuthTokens)
 	return false
 }
 
