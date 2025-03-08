@@ -2,12 +2,13 @@ package api
 
 import (
 	"github.com/SDZZGNDRC/DKV/src/controller/api/utils"
+	"github.com/SDZZGNDRC/DKV/src/types"
 	"github.com/gin-gonic/gin"
 )
 
 func InitAPI(
 	host string,
-	apiChans APIChans,
+	apiChans types.APIChans,
 ) {
 	r := gin.Default()
 
@@ -16,5 +17,5 @@ func InitAPI(
 
 	// 注册路由
 
-	r.Run(host)
+	go r.Run(host)
 }

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/SDZZGNDRC/DKV/src/raft"
+	"github.com/SDZZGNDRC/DKV/src/types"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -410,14 +411,27 @@ func (kv *KVServer) LoadSnapShot(snapShot []byte) {
 	}
 }
 
+func (kv *KVServer) GetSysStatus(reqChan chan struct{}, respChan chan *types.SysStatus) {
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
+
+	for range reqChan {
+		respChan <- &types.SysStatus{
+			Role:      kv.rf.GetRole(),
+			ServerId:  kv.me,
+			Term:      kv.rf.GetCurrentTerm(),
+			VotedFor:  kv.rf.GetVotedFor(),
+			Timestamp: time.Now().Unix(),
+		}
+	}
+}
+
 func validateToken(token string, authToken string) bool {
 	// 这里可以添加更复杂的token验证逻辑
 	return token == authToken
 }
 
-func StartKVServer(conf Kvserver, me int, persister *raft.Persister, maxraftstate int) *KVServer {
-	// call labgob.Register on structures you want
-	// Go's RPC library to marshall/unmarshall.
+func StartKVServer(conf Kvserver, me int, persister *raft.Persister, maxraftstate int, apiChan *types.APIChans) *KVServer {
 	gob.Register(Op{})
 
 	kv := new(KVServer)
@@ -483,6 +497,9 @@ func StartKVServer(conf Kvserver, me int, persister *raft.Persister, maxraftstat
 
 	DPrintf("etcd serivce is running on addr: %s", conf.ServerAddr+conf.ServerPort)
 	kv.grpc = gServer
+
+	// start api goroutine
+	go kv.GetSysStatus(apiChan.GetSysStatusReqChan, apiChan.GetSysStatusRespChan)
 
 	DPrintf("server [%d] restart", kv.me)
 

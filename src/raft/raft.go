@@ -110,6 +110,32 @@ func (rf *Raft) Print() {
 	DPrintf("raft%v:{currentTerm=%v, role=%v, votedFor=%v}\n", rf.me, rf.currentTerm, rf.role, rf.votedFor)
 }
 
+func (rf *Raft) GetRole() string {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	switch rf.role {
+	case Follower:
+		return "Follower"
+	case Candidate:
+		return "Candidate"
+	case Leader:
+		return "Leader"
+	}
+	return "Unknown"
+}
+
+func (rf *Raft) GetCurrentTerm() int {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	return rf.currentTerm
+}
+
+func (rf *Raft) GetVotedFor() int {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	return rf.votedFor
+}
+
 func (rf *Raft) ResetVoteTimer() {
 	rdTimeOut := GetRandomElectTimeOut(rf.rd)
 	rf.voteTimer.Reset(time.Duration(rdTimeOut) * time.Millisecond)

@@ -11,4 +11,6 @@ type Kvserver struct {
 	DataBasePath string
 	Maxraftstate int
 	AuthToken    string
+	APIAddr      string
+	APIPort      string
 }

@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/SDZZGNDRC/DKV/src/controller/api"
 	"github.com/SDZZGNDRC/DKV/src/kvraft"
 	"github.com/SDZZGNDRC/DKV/src/raft"
+	"github.com/SDZZGNDRC/DKV/src/types"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 )
@@ -77,6 +79,14 @@ func main() {
 	if err != nil {
 		log.Fatalf("加载配置失败: %v", err)
 	}
-	_ = kvraft.StartKVServer(*conf, conf.Rafts.Me, raft.MakePersister(), conf.Maxraftstate)
+	apiChans := types.APIChans{
+		GetSysStatusReqChan:  make(chan struct{}),
+		GetSysStatusRespChan: make(chan *types.SysStatus),
+	}
+
+	log.Println("Starting API server on", conf.APIAddr+conf.APIPort)
+	api.InitAPI(conf.APIAddr+conf.APIPort, apiChans)
+	log.Println("Starting KV server on", conf.ServerAddr+conf.ServerPort)
+	kvraft.StartKVServer(*conf, conf.Rafts.Me, raft.MakePersister(), conf.Maxraftstate, &apiChans)
 	select {}
 }

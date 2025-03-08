@@ -5,10 +5,11 @@ import (
 	"time"
 
 	"github.com/SDZZGNDRC/DKV/src/kvraft"
+	"github.com/SDZZGNDRC/DKV/src/types"
 	"github.com/gin-gonic/gin"
 )
 
-func NewHandlers_GetSysStatus(reqChan chan struct{}, respChan chan *kvraft.SysStatus) gin.HandlerFunc {
+func NewHandlers_GetSysStatus(reqChan chan struct{}, respChan chan *types.SysStatus) gin.HandlerFunc {
 	handler := func(c *gin.Context) {
 		// 清空respChan中的旧数据
 	loop:

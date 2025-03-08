@@ -20,5 +20,7 @@
     },
     "DataBasePath": "/path/to/database",
     "Maxraftstate": 1000,
-    "AuthToken": "123456789"
+    "AuthToken": "123456789",
+    "APIAddr": "localhost",
+    "APIPort": ":5110"
 }
