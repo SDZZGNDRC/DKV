@@ -416,7 +416,7 @@ func (kv *KVServer) GetSysStatus(reqChan chan struct{}, respChan chan *types.Sys
 
 	for range reqChan {
 		kv.mu.Lock()
-		respChan <- &types.SysStatus{
+		resp := &types.SysStatus{
 			Role:      kv.rf.GetRole(),
 			ServerId:  kv.me,
 			Term:      kv.rf.GetCurrentTerm(),
@@ -424,6 +424,50 @@ func (kv *KVServer) GetSysStatus(reqChan chan struct{}, respChan chan *types.Sys
 			Timestamp: time.Now().Unix(),
 		}
 		kv.mu.Unlock()
+		respChan <- resp
+	}
+}
+
+func (kv *KVServer) OpGet(reqChan chan *string, respChan chan *string) {
+
+	for key := range reqChan {
+		kv.mu.Lock()
+		val, exist := kv.db[*key]
+		var resp *string
+		if exist {
+			resp = &val
+		} else {
+			resp = new(string)
+		}
+		kv.mu.Unlock()
+		respChan <- resp
+	}
+}
+
+func (kv *KVServer) OpPut(reqChan chan *types.OpPutReq, respChan chan *types.OpPutResp) {
+
+	for op := range reqChan {
+		kv.mu.Lock()
+		kv.db[op.Key] = op.Value
+		kv.mu.Unlock()
+		resp := &types.OpPutResp{Success: true}
+		respChan <- resp
+	}
+}
+
+func (kv *KVServer) OpAppend(reqChan chan *types.OpAppendReq, respChan chan *types.OpAppendResp) {
+
+	for op := range reqChan {
+		kv.mu.Lock()
+		val, exist := kv.db[op.Key]
+		if exist {
+			kv.db[op.Key] = val + op.Value
+		} else {
+			kv.db[op.Key] = op.Value
+		}
+		kv.mu.Unlock()
+		resp := &types.OpAppendResp{Success: true}
+		respChan <- resp
 	}
 }
 
@@ -501,6 +545,9 @@ func StartKVServer(conf *config.GlobalConfig, me int, persister *raft.Persister,
 
 	// start api goroutine
 	go kv.GetSysStatus(apiChan.GetSysStatusReqChan, apiChan.GetSysStatusRespChan)
+	go kv.OpGet(apiChan.OpGetReqChan, apiChan.OpGetRespChan)
+	go kv.OpAppend(apiChan.OpAppendReqChan, apiChan.OpAppendRespChan)
+	go kv.OpPut(apiChan.OpPutReqChan, apiChan.OpPutRespChan)
 
 	DPrintf("server [%d] restart", kv.me)
 

@@ -41,5 +41,10 @@ func InitAPI(
 	// 路由注册
 	api.GET("/get-sysstatus", handlers.NewHandlers_GetSysStatus(apiChans.GetSysStatusReqChan, apiChans.GetSysStatusRespChan))
 
+	kv := r.Group("/kv")
+	kv.GET("/get", handlers.NewHandlers_OpGet(apiChans.OpGetReqChan, apiChans.OpGetRespChan))
+	kv.POST("/append", handlers.NewHandlers_OpAppend(apiChans.OpAppendReqChan, apiChans.OpAppendRespChan))
+	kv.POST("/put", handlers.NewHandlers_OpPut(apiChans.OpPutReqChan, apiChans.OpPutRespChan))
+
 	go r.Run(host)
 }

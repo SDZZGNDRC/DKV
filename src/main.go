@@ -14,6 +14,15 @@ func main() {
 	apiChans := types.APIChans{
 		GetSysStatusReqChan:  make(chan struct{}),
 		GetSysStatusRespChan: make(chan *types.SysStatus),
+
+		OpGetReqChan:  make(chan *string),
+		OpGetRespChan: make(chan *string),
+
+		OpAppendReqChan:  make(chan *types.OpAppendReq),
+		OpAppendRespChan: make(chan *types.OpAppendResp),
+
+		OpPutReqChan:  make(chan *types.OpPutReq),
+		OpPutRespChan: make(chan *types.OpPutResp),
 	}
 
 	log.Println("Starting API server on", config.Config.APIAddr+config.Config.APIPort)
